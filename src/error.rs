@@ -1,1 +1,11 @@
-﻿#[derive(Debug)] pub enum AppError { Io(std::io::Error), Format(String) } impl From<std::io::Error> for AppError { fn from(e: std::io::Error)->Self{Self::Io(e)} } pub type Result<T> = std::result::Result<T, AppError>;
+#[derive(Debug)]
+pub enum AppError {
+    Io(std::io::Error),
+    Format(String),
+}
+impl From<std::io::Error> for AppError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+pub type Result<T> = std::result::Result<T, AppError>;

@@ -24,3 +24,10 @@ target
 # Added by cargo
 
 /target
+
+# Added by user
+
+/YPbank_formats
+/other_formats
+
+

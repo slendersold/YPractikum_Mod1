@@ -1,1 +1,3 @@
-﻿fn main() { println!("ypbank_converter"); }
+fn main() {
+    println!("ypbank_converter");
+}

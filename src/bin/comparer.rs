@@ -1,1 +1,3 @@
-﻿fn main(){ println!("ypbank_compare"); }
+fn main() {
+    println!("ypbank_compare");
+}

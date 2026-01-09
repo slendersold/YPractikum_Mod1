@@ -1,8 +1,33 @@
-[package]
+[package]                                                       # <- секция информации и проекте
+name = "converter"                                              # <- имя проекта (обязательное поле)
+version = "0.1.0"                                               # <- текущая версия проекта
+edition = "2024"                                                # <- версия языка, используемая компилятором
+description = "Короткое описание"                               # <- описание проекта
+authors = ["slendersold@mail.ru"]                               # <- информация об авторах проекта
+license = "MIT OR Apache-2.0"                                   # <- тип лицензии
+homepage = "https://yandex.ru"                                  # <- домашняя страница проекта
+repository = "https://github.com/slendersold/YPractikum_Mod1"   # <- репозиторий проекта
+keywords = ["cli"]                                              # <- список ключевых слов, описывающих проект
+categories = ["command-line-utilities"]                         # <- список категорий проекта
+default-run = "converter"     
+
+[dependencies]                          # <- секция основных зависимостей
+# serde = "1.0"                           # <- зависимость с указанием версии (SemVer)
+# my-local-crate = { path = "./local" }   # <- пример локальной зависимости
+
+# [dev-dependencies]                      # <- секция зависимостей тестов/бенчмарков
+# tempdir = "3.0" 
+
+# [build-dependencies]                    # <- секция зависимостей скриптов сборки
+# cc = "1.0"                              
+
+# [profile.release]                       # <- секция профиля сборки
+# opt-level = 'z' 
+
+[[bin]]
 name = "converter"
-version = "0.1.0"
-edition = "2021"
-default-run = "converter"
+path = "src/main.rs"
 
-
-[dependencies]
+[lib]
+name = "utils"
+path = "src/lib.rs"

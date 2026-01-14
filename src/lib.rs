@@ -1,4 +1,4 @@
-pub mod utils;
+mod utils;
 
 pub use utils::{
     bin_format,

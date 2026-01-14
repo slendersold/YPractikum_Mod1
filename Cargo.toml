@@ -12,6 +12,7 @@ categories = ["command-line-utilities"]                         # <- списо�
 default-run = "converter"     
 
 [dependencies]                          # <- секция основных зависимостей
+clap = { version = "4.5", features = ["derive"] }
 # serde = "1.0"                           # <- зависимость с указанием версии (SemVer)
 # my-local-crate = { path = "./local" }   # <- пример локальной зависимости
 

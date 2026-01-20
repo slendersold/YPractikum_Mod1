@@ -1,8 +1,6 @@
-mod utils;
+mod formats;
 
-pub use utils::{
-    bin_format,
-    csv_format,
-    txt_format,
+pub use formats::{
     error,
+    ypbank
 };

@@ -1,17 +1,23 @@
-use std::collections::HashMap;
+// здесь должны находиться все типы хранения информации
 
+use std::collections::HashMap;
+use std::hash::Hash;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum TransactionType {
     Deposit,
     Transfer,
     Withdrawal
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Status {
     Success,
     Failure,
     Pending
 }
 
+#[derive(Debug, Clone)]
 enum AccountStatementType {
     YPBank,
     MT940,
@@ -19,7 +25,16 @@ enum AccountStatementType {
     Sber
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Структура метаданных записки: Информация из шапки или в целом информация
+#[derive(Display, Debug, Default)]
+pub struct StatementMeta {
+    pub source: Option<String>,   // например "YPBankCsv"
+    pub account_id: Option<String>,
+    pub generated_at_ms: Option<u64>,
+}
+
+// Структура описания одной операции
+#[derive(Display, Debug, PartialOrd, PartialEq, Eq)]
 pub struct Operation {
     pub tx_id: u64,
     pub tx_type: TransactionType,
@@ -31,13 +46,13 @@ pub struct Operation {
     pub description: Option<String>,
 }
 
+// убрать #[derive(PartialOrd, PartialEq, Eq)] и прописать свою логику без description в эти черты
+
+// Структура хранения записки целиком
+#[derive(Display, Debug)]
 pub struct Statement {
     pub operations: Vec<Operation>,
     pub meta: StatementMeta, // опционально
 }
 
-pub struct StatementMeta {
-    pub source: Option<String>,   // например "YPBankCsv"
-    pub account_id: Option<String>,
-    pub generated_at_ms: Option<u64>,
-}
+// Добавить и имплементирвать черту сравниваемости, добавить функционал пополнения внутреннего массива с предварительной сортировкой

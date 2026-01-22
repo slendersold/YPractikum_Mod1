@@ -1,21 +1,29 @@
-// здесь должны находиться все типы хранения информации
+/// здесь должны находиться все типы хранения информации
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+
+/// Перечисление возможных типов транзакции
+/// Черты перечисления: Debug, Clone, PartialEq, PartialOrd, Eq, Ord
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
 enum TransactionType {
     Deposit,
     Transfer,
     Withdrawal
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Перечисление возможных результатов транзакции
+/// Черты перечисления: Debug, Clone, PartialEq, PartialOrd, Eq, Ord
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
 enum Status {
     Success,
     Failure,
     Pending
 }
 
+
+/// Перечисление возможных типов записки
+/// Черты перечисления: Debug, Clone
 #[derive(Debug, Clone)]
 enum AccountStatementType {
     YPBank,
@@ -24,7 +32,8 @@ enum AccountStatementType {
     Sber
 }
 
-// Структура метаданных записки: Информация из шапки или в целом информация
+/// Структура метаданных записки: Информация из шапки или в целом информация
+/// Черты структуры: Display, Debug, Default
 #[derive(Display, Debug, Default)]
 pub struct StatementMeta {
     pub source: Option<String>,   // например "YPBankCsv"
@@ -32,7 +41,9 @@ pub struct StatementMeta {
     pub generated_at_ms: Option<u64>,
 }
 
-// Структура описания одной операции
+
+/// Структура описания одной операции
+/// Черты структуры: Display, Debug, PartialEq, Eq, Ord, PartialOrd
 #[derive(Display, Debug)]
 pub struct Operation {
     pub tx_id: u64,
@@ -45,8 +56,11 @@ pub struct Operation {
     pub description: Option<String>,
 }
 
+
+
 impl Operation {
     #[inline]
+    /// Выделяет ключевые элементы структуры в кортеж
     fn key(&self) -> (
         u64,            // tx_id
         TransactionType,
@@ -87,7 +101,8 @@ impl PartialOrd for Operation {
 }
 
 
-// Структура хранения записки целиком
+/// Структура хранения записки целиком
+/// Черты структуры: Display, Debug, PartialEq, Eq
 #[derive(Display, Debug)]
 pub struct Statement {
     operations: Vec<Operation>,
@@ -95,7 +110,7 @@ pub struct Statement {
 }
 // Методы для добавления данных
 impl Statement {
-    // Добавить одну в порядке возрастания
+    /// Добавить одну запись в порядке возрастания
     pub fn append(&mut self, op: Operation) {
         let idx = match self.operations.binary_search(&op) {
             Ok(i) | Err(i) => i,
@@ -103,6 +118,7 @@ impl Statement {
         self.operations.insert(idx, op);
     }
 
+    /// Добавить группу записей с последующей сортировкой
     // Если нужно “добавить пачку”, выгоднее append + sort один раз:
     pub fn extend_and_sort(&mut self, mut ops: Vec<Operation>) {
         self.operations.append(&mut ops);

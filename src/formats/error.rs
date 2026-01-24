@@ -1,6 +1,8 @@
+/// Простой enum ошибок
 #[derive(Debug)]
 pub enum AppError {
     Io(std::io::Error),
+    BadLine { line_no: usize, line: String, msg: String },
     Format(String),
 }
 impl From<std::io::Error> for AppError {
@@ -9,3 +11,4 @@ impl From<std::io::Error> for AppError {
     }
 }
 pub type Result<T> = std::result::Result<T, AppError>;
+

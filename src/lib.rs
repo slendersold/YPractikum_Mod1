@@ -2,5 +2,6 @@ mod formats;
 
 pub use formats::{
     error,
-    ypbank
+    ypbank,
+    data
 };

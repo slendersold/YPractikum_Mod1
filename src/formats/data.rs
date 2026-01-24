@@ -218,8 +218,9 @@ impl Eq for Statement {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
 
-    // --- Хелперы -------------------------------------------------------------
+    // --- Helpers -------------------------------------------------------------
 
     fn meta(src: &str, acc: &str, ts: u64) -> StatementMeta {
         StatementMeta {
@@ -229,7 +230,7 @@ mod tests {
         }
     }
 
-    fn op(
+    fn op_new(
         tx_id: u64,
         tx_type: TransactionType,
         from_user_id: u64,
@@ -239,7 +240,7 @@ mod tests {
         status: Status,
         description: Option<&str>,
     ) -> Operation {
-        Operation {
+        Operation::new(
             tx_id,
             tx_type,
             from_user_id,
@@ -247,29 +248,81 @@ mod tests {
             amount,
             timestamp_ms,
             status,
-            description: description.map(|s| s.to_string()),
+            description.map(|s| s.to_string()),
+        )
+    }
+
+    fn empty_statement() -> Statement {
+        // Creates an empty statement through the public constructor path (from_read),
+        // without relying on private fields.
+        let mut r: &[u8] = &[];
+        Statement::from_read(&mut r, |_| Ok(None)).unwrap()
+    }
+
+    fn tx_type_name(t: &TransactionType) -> String {
+        match t {
+            TransactionType::Deposit => "Deposit".to_string(),
+            TransactionType::Transfer => "Transfer".to_string(),
+            TransactionType::Withdrawal => "Withdrawal".to_string(),
         }
     }
 
-    fn empty_statement_with_meta() -> Statement {
-        Statement {
-            operations: vec![],
-            meta: meta("TestSource", "acc-1", 123),
+    fn status_name(s: &Status) -> String {
+        match s {
+            Status::Success => "Success".to_string(),
+            Status::Failure => "Failure".to_string(),
+            Status::Pending => "Pending".to_string(),
         }
     }
 
-    fn assert_sorted_ops(ops: &[Operation]) {
+    fn key_string(op: &Operation) -> String {
+        format!(
+            "{}|{}|{}|{}|{}|{}|{}",
+            op.tx_id(),
+            tx_type_name(op.tx_type()),
+            op.from_user_id(),
+            op.to_user_id(),
+            op.amount(),
+            op.timestamp_ms(),
+            status_name(op.status()),
+        )
+    }
+
+    fn collect_keys_via_write_to(st: &mut Statement) -> Vec<String> {
+        let mut out: Vec<u8> = Vec::new();
+        let mut keys: Vec<String> = Vec::new();
+        st.write_to(&mut out, |_, op| {
+            keys.push(key_string(op));
+            Ok(())
+        })
+        .unwrap();
+        keys
+    }
+
+    fn assert_sorted_keys(keys: &[String]) {
         assert!(
-            ops.windows(2).all(|w| w[0] <= w[1]),
-            "operations должны быть отсортированы по Ord"
+            keys.windows(2).all(|w| w[0] <= w[1]),
+            "Checks that the written operations are sorted by Operation::Ord key"
         );
+    }
+
+    fn statement_from_ops(mut ops: Vec<Operation>, meta: StatementMeta) -> Statement {
+        // Builds a statement using the public from_read path and moves operations out of a Vec.
+        let mut r: &[u8] = &[];
+        let mut st = Statement::from_read(&mut r, move |_| {
+            Ok(ops.pop()) // pop moves values out; order does not matter because append sorts
+        })
+        .unwrap();
+        st.meta = meta;
+        st
     }
 
     // --- Operation: Eq/Ord/PartialOrd ---------------------------------------
 
     #[test]
     fn operation_eq_ignores_description() {
-        let a = op(
+        // Checks that description does not affect equality and ordering.
+        let a = op_new(
             1,
             TransactionType::Deposit,
             10,
@@ -279,7 +332,7 @@ mod tests {
             Status::Success,
             Some("desc A"),
         );
-        let b = op(
+        let b = op_new(
             1,
             TransactionType::Deposit,
             10,
@@ -290,67 +343,71 @@ mod tests {
             Some("desc B"),
         );
 
-        assert_eq!(a, b, "description не должен влиять на Eq/Ord");
+        assert_eq!(a, b);
         assert_eq!(a.cmp(&b), std::cmp::Ordering::Equal);
     }
 
     #[test]
     fn operation_ord_primary_by_tx_id() {
-        let a = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op(2, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        // Checks that tx_id is the primary ordering key.
+        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        let b = op_new(2, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
         assert!(a < b);
     }
 
     #[test]
     fn operation_ord_then_by_tx_type() {
-        let a = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op(1, TransactionType::Transfer, 1, 2, 10, 100, Status::Success, None);
-
-        // По derive(Ord) у enum: Deposit < Transfer < Withdrawal (в порядке объявления)
+        // Checks that tx_type participates in ordering after tx_id.
+        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        let b = op_new(1, TransactionType::Transfer, 1, 2, 10, 100, Status::Success, None);
         assert!(a < b);
     }
 
     #[test]
     fn operation_ord_then_by_from_user_id() {
-        let a = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op(1, TransactionType::Deposit, 2, 2, 10, 100, Status::Success, None);
+        // Checks that from_user_id participates in ordering after tx_type.
+        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        let b = op_new(1, TransactionType::Deposit, 2, 2, 10, 100, Status::Success, None);
         assert!(a < b);
     }
 
     #[test]
     fn operation_ord_then_by_to_user_id() {
-        let a = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op(1, TransactionType::Deposit, 1, 3, 10, 100, Status::Success, None);
+        // Checks that to_user_id participates in ordering after from_user_id.
+        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        let b = op_new(1, TransactionType::Deposit, 1, 3, 10, 100, Status::Success, None);
         assert!(a < b);
     }
 
     #[test]
     fn operation_ord_then_by_amount_including_negative() {
-        let a = op(1, TransactionType::Deposit, 1, 2, -5, 100, Status::Success, None);
-        let b = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        // Checks that amount participates in ordering and handles negative values.
+        let a = op_new(1, TransactionType::Deposit, 1, 2, -5, 100, Status::Success, None);
+        let b = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
         assert!(a < b);
     }
 
     #[test]
     fn operation_ord_then_by_timestamp() {
-        let a = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op(1, TransactionType::Deposit, 1, 2, 10, 200, Status::Success, None);
+        // Checks that timestamp_ms participates in ordering after amount.
+        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        let b = op_new(1, TransactionType::Deposit, 1, 2, 10, 200, Status::Success, None);
         assert!(a < b);
     }
 
     #[test]
     fn operation_ord_then_by_status() {
-        let a = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Failure, None);
-
-        // По объявлению enum: Success < Failure < Pending
+        // Checks that status participates in ordering after timestamp_ms.
+        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        let b = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Failure, None);
         assert!(a < b);
     }
 
     #[test]
     fn operation_partial_ord_is_total_order() {
-        let a = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op(2, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        // Checks that partial_cmp is consistent with cmp and forms a total order.
+        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        let b = op_new(2, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
 
         assert_eq!(a.partial_cmp(&b), Some(std::cmp::Ordering::Less));
         assert_eq!(b.partial_cmp(&a), Some(std::cmp::Ordering::Greater));
@@ -360,260 +417,395 @@ mod tests {
     // --- Statement: append / extend_and_sort --------------------------------
 
     #[test]
-    fn statement_append_inserts_into_sorted_position_basic() {
-        let mut s = empty_statement_with_meta();
+    fn statement_append_inserts_sorted() {
+        // Checks that append maintains sorted order through binary_search insertion.
+        let mut st = empty_statement();
+        st.meta = meta("TestSource", "acc-1", 123);
 
-        // вставляем намеренно "вразнобой"
-        s.append(op(2, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None));
-        s.append(op(1, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None));
-        s.append(op(3, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None));
+        st.append(op_new(2, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None));
+        st.append(op_new(1, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None));
+        st.append(op_new(3, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None));
 
-        assert_eq!(s.operations.len(), 3);
-        assert_sorted_ops(&s.operations);
-
-        assert_eq!(s.operations[0].tx_id, 1);
-        assert_eq!(s.operations[1].tx_id, 2);
-        assert_eq!(s.operations[2].tx_id, 3);
+        let keys = collect_keys_via_write_to(&mut st);
+        assert_eq!(keys.len(), 3);
+        assert_sorted_keys(&keys);
+        assert!(keys[0].starts_with("1|"));
+        assert!(keys[1].starts_with("2|"));
+        assert!(keys[2].starts_with("3|"));
     }
 
     #[test]
-    fn statement_append_keeps_sorted_for_many_fields_not_only_tx_id() {
-        let mut s = empty_statement_with_meta();
+    fn statement_append_orders_by_full_key_not_only_tx_id() {
+        // Checks that ordering depends on the full Operation key tuple.
+        let mut st = empty_statement();
 
-        // одинаковый tx_id, но разные поля => сортировка по key()
-        let a = op(1, TransactionType::Transfer, 2, 1, 5, 100, Status::Success, None);
-        let b = op(1, TransactionType::Deposit, 2, 1, 5, 100, Status::Success, None);
-        let c = op(1, TransactionType::Withdrawal, 1, 1, 5, 100, Status::Success, None);
+        st.append(op_new(1, TransactionType::Transfer, 2, 1, 5, 100, Status::Success, None));
+        st.append(op_new(1, TransactionType::Deposit, 2, 1, 5, 100, Status::Success, None));
+        st.append(op_new(1, TransactionType::Withdrawal, 1, 1, 5, 100, Status::Success, None));
 
-        // clone запрещён — просто создаём значения и сразу добавляем
-        s.append(a);
-        s.append(b);
-        s.append(c);
+        let keys = collect_keys_via_write_to(&mut st);
+        assert_eq!(keys.len(), 3);
+        assert_sorted_keys(&keys);
 
-        assert_sorted_ops(&s.operations);
-
-        // Deposit < Transfer < Withdrawal
-        assert_eq!(s.operations[0].tx_type, TransactionType::Deposit);
-        assert_eq!(s.operations[1].tx_type, TransactionType::Transfer);
-        assert_eq!(s.operations[2].tx_type, TransactionType::Withdrawal);
+        // Expected order by enum declaration: Deposit < Transfer < Withdrawal.
+        assert!(keys[0].contains("|Deposit|"));
+        assert!(keys[1].contains("|Transfer|"));
+        assert!(keys[2].contains("|Withdrawal|"));
     }
 
     #[test]
     fn statement_append_allows_duplicates_by_key() {
-        let mut s = empty_statement_with_meta();
+        // Checks that two operations equal by key can coexist and remain adjacent.
+        let mut st = empty_statement();
 
-        let a = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, Some("a"));
-        let b = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, Some("b"));
+        st.append(op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, Some("a")));
+        st.append(op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, Some("b")));
 
-        // Они равны по key(), binary_search вернет Ok(i), insert(i, op) => вставит рядом
-        s.append(a);
-        s.append(b);
-
-        assert_eq!(s.operations.len(), 2);
-        assert_eq!(s.operations[0], s.operations[1]);
-        assert_sorted_ops(&s.operations);
+        let keys = collect_keys_via_write_to(&mut st);
+        assert_eq!(keys.len(), 2);
+        assert_eq!(keys[0], keys[1]);
+        assert_sorted_keys(&keys);
     }
 
     #[test]
-    fn extend_and_sort_sorts_once() {
-        let mut s = empty_statement_with_meta();
+    fn extend_and_sort_sorts_once_and_keeps_duplicates() {
+        // Checks that extend_and_sort sorts combined data and keeps duplicates by key.
+        let mut st = empty_statement();
+        st.append(op_new(5, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None));
 
-        s.append(op(5, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None));
-
-        let mut batch = vec![
-            op(3, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
-            op(1, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
-            op(4, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
-            op(2, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
+        let batch = vec![
+            op_new(3, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
+            op_new(1, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
+            op_new(4, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
+            op_new(2, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
+            op_new(
+                2,
+                TransactionType::Deposit,
+                1,
+                1,
+                10,
+                100,
+                Status::Success,
+                Some("dup with different description"),
+            ),
         ];
 
-        // специально сделаем batch еще и с "лишним" описанием
-        batch.push(op(
+        st.extend_and_sort(batch);
+
+        let keys = collect_keys_via_write_to(&mut st);
+        assert_eq!(keys.len(), 6);
+        assert_sorted_keys(&keys);
+
+        let two_count = keys.iter().filter(|k| k.starts_with("2|")).count();
+        assert_eq!(two_count, 2);
+        assert!(keys[0].starts_with("1|"));
+    }
+
+    // --- Statement: Eq -------------------------------------------------------
+
+    #[test]
+    fn statement_eq_true_when_operations_identical_and_meta_ignored() {
+        // Checks that Statement equality is based on operations only, meta is ignored.
+        let ops1 = vec![
+            op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None),
+            op_new(2, TransactionType::Transfer, 2, 3, 20, 110, Status::Failure, Some("x")),
+            op_new(3, TransactionType::Withdrawal, 3, 0, 30, 120, Status::Pending, Some("y")),
+        ];
+        let ops2 = vec![
+            op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None),
+            op_new(2, TransactionType::Transfer, 2, 3, 20, 110, Status::Failure, Some("x")),
+            op_new(3, TransactionType::Withdrawal, 3, 0, 30, 120, Status::Pending, Some("y")),
+        ];
+
+        let a = statement_from_ops(ops1, meta("A", "acc-1", 111));
+        let b = statement_from_ops(ops2, meta("B", "acc-2", 222));
+
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn statement_eq_false_when_one_operation_differs_by_key() {
+        // Checks that a single key difference makes statements unequal.
+        let ops1 = vec![op_new(
+            1,
+            TransactionType::Deposit,
+            1,
             2,
+            10,
+            100,
+            Status::Success,
+            None,
+        )];
+        let ops2 = vec![op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            11,
+            100,
+            Status::Success,
+            None,
+        )];
+
+        let a = statement_from_ops(ops1, StatementMeta::default());
+        let b = statement_from_ops(ops2, StatementMeta::default());
+
+        assert_ne!(a, b);
+    }
+
+    // --- Statement: from_read / write_to abstractions ------------------------
+
+    #[test]
+    fn from_read_empty_when_next_op_returns_none() {
+        // Checks that from_read produces an empty statement when next_op returns None immediately.
+        let mut r: &[u8] = b"irrelevant";
+        let mut st = Statement::from_read(&mut r, |_| Ok(None)).unwrap();
+
+        let mut out: Vec<u8> = Vec::new();
+        let mut calls = 0usize;
+        st.write_to(&mut out, |_, _| {
+            calls += 1;
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(calls, 0);
+    }
+
+    #[test]
+    fn from_read_propagates_error_from_next_op() {
+        // Checks that from_read propagates errors produced by the next_op strategy.
+        let mut r: &[u8] = b"x";
+
+        let err = Statement::from_read(&mut r, |_| -> Result<Option<Operation>, AppError> {
+            Err(AppError::BadLine {
+                line_no: 1,
+                line: "x".to_string(),
+                msg: "boom".to_string(),
+            })
+        })
+        .unwrap_err();
+
+        match err {
+            AppError::BadLine { line_no, .. } => assert_eq!(line_no, 1),
+            _ => panic!("Expected AppError::BadLine"),
+        }
+    }
+
+    #[test]
+    fn write_to_calls_writer_for_each_operation_in_sorted_order() {
+        // Checks that write_to calls the writer for each operation and in sorted order.
+        let ops = vec![
+            op_new(3, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
+            op_new(1, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
+            op_new(2, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
+        ];
+        let mut st = statement_from_ops(ops, StatementMeta::default());
+
+        let keys = collect_keys_via_write_to(&mut st);
+        assert_eq!(keys.len(), 3);
+        assert_sorted_keys(&keys);
+        assert!(keys[0].starts_with("1|"));
+        assert!(keys[1].starts_with("2|"));
+        assert!(keys[2].starts_with("3|"));
+    }
+
+    #[test]
+    fn write_to_propagates_io_error_via_writer_strategy() {
+        // Checks that write_to propagates IO errors surfaced by the writer strategy.
+        struct FailWriter;
+        impl io::Write for FailWriter {
+            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+                Err(io::Error::new(io::ErrorKind::Other, "fail"))
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let ops = vec![op_new(
+            1,
             TransactionType::Deposit,
             1,
             1,
             10,
             100,
             Status::Success,
-            Some("dup with different description"),
-        ));
+            None,
+        )];
+        let mut st = statement_from_ops(ops, StatementMeta::default());
 
-        s.extend_and_sort(batch);
-
-        assert_eq!(s.operations.len(), 6);
-        assert_sorted_ops(&s.operations);
-
-        // tx_id должны начинаться с 1
-        assert_eq!(s.operations[0].tx_id, 1);
-        // два элемента с tx_id=2 равны по key()
-        let two_count = s.operations.iter().filter(|x| x.tx_id == 2).count();
-        assert_eq!(two_count, 2);
-    }
-
-    // --- Statement: Eq -------------------------------------------------------
-
-    #[test]
-    fn statement_eq_true_when_operations_identical() {
-        let mut a = empty_statement_with_meta();
-        let mut b = empty_statement_with_meta();
-
-        // clone запрещён — создаём два одинаковых набора отдельно
-        let ops_a = vec![
-            op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None),
-            op(2, TransactionType::Transfer, 2, 3, 20, 110, Status::Failure, Some("x")),
-            op(3, TransactionType::Withdrawal, 3, 0, 30, 120, Status::Pending, Some("y")),
-        ];
-        let ops_b = vec![
-            op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None),
-            op(2, TransactionType::Transfer, 2, 3, 20, 110, Status::Failure, Some("x")),
-            op(3, TransactionType::Withdrawal, 3, 0, 30, 120, Status::Pending, Some("y")),
-        ];
-
-        for o in ops_a {
-            a.append(o);
-        }
-        for o in ops_b {
-            b.append(o);
-        }
-
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn statement_eq_ignores_meta_by_design() {
-        let mut a = Statement {
-            operations: vec![],
-            meta: meta("A", "acc-1", 111),
-        };
-        let mut b = Statement {
-            operations: vec![],
-            meta: meta("B", "acc-2", 222),
-        };
-
-        a.append(op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None));
-        b.append(op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None));
-
-        // У тебя PartialEq сравнивает только operations
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn statement_eq_false_when_one_operation_differs_by_key() {
-        let mut a = empty_statement_with_meta();
-        let mut b = empty_statement_with_meta();
-
-        a.append(op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None));
-        b.append(op(1, TransactionType::Deposit, 1, 2, 11, 100, Status::Success, None)); // amount differs
-
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn statement_eq_false_when_same_set_but_different_order() {
-        // ВАЖНО: твой Eq = сравнение Vec как есть.
-        // Поэтому если операции одинаковые, но в разных порядках (и без сортировки),
-        // будет false. Этот тест фиксирует текущее поведение.
-
-        let op1a = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let op2a = op(2, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-
-        let op1b = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let op2b = op(2, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-
-        let a = Statement {
-            operations: vec![op1a, op2a],
-            meta: StatementMeta::default(),
-        };
-        let b = Statement {
-            operations: vec![op2b, op1b],
-            meta: StatementMeta::default(),
-        };
-
-        assert_ne!(a, b, "Eq у Statement сейчас чувствителен к порядку в Vec");
-    }
-
-    #[test]
-    fn statement_eq_true_after_sorting_same_set() {
-        let op1a = op(2, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let op2a = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-
-        let op1b = op(2, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let op2b = op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-
-        let mut a = Statement {
-            operations: vec![op1a, op2a],
-            meta: StatementMeta::default(),
-        };
-        let mut b = Statement {
-            operations: vec![op2b, op1b],
-            meta: StatementMeta::default(),
-        };
-
-        a.operations.sort_unstable();
-        b.operations.sort_unstable();
-
-        assert_eq!(a, b);
-    }
-
-    // --- Edge cases ----------------------------------------------------------
-
-    #[test]
-    fn empty_statements_are_equal() {
-        let a = Statement {
-            operations: vec![],
-            meta: StatementMeta::default(),
-        };
-        let b = Statement {
-            operations: vec![],
-            meta: meta("X", "Y", 999),
-        };
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn append_many_mixed_cases_and_verify_sorted() {
-        let mut s = empty_statement_with_meta();
-
-        let ops = vec![
-            op(10, TransactionType::Transfer, 100, 200, 1, 900, Status::Failure, Some("a")),
-            op(10, TransactionType::Transfer, 100, 200, 1, 900, Status::Success, Some("b")), // status differs => key differs
-            op(9, TransactionType::Deposit, 99, 0, -100, 800, Status::Pending, None),
-            op(9, TransactionType::Deposit, 99, 0, -100, 800, Status::Pending, Some("ignored")),
-            op(11, TransactionType::Withdrawal, 0, 1, 500, 1_000, Status::Success, None),
-            op(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None),
-            op(1, TransactionType::Deposit, 1, 2, 9, 100, Status::Success, None), // amount differs
-        ];
-
-        for o in ops {
-            s.append(o);
-        }
-
-        assert_eq!(s.operations.len(), 7);
-        assert_sorted_ops(&s.operations);
-
-        // Быстрая sanity-проверка первого и последнего
-        assert_eq!(s.operations.first().unwrap().tx_id, 1);
-        assert_eq!(s.operations.last().unwrap().tx_id, 11);
-
-        // Два одинаковых по key (9/Deposit/99/0/-100/800/Pending) должны быть рядом
-        let idxs: Vec<usize> = s
-            .operations
-            .iter()
-            .enumerate()
-            .filter(|(_, x)| {
-                x.tx_id == 9
-                    && x.tx_type == TransactionType::Deposit
-                    && x.from_user_id == 99
-                    && x.to_user_id == 0
-                    && x.amount == -100
-                    && x.timestamp_ms == 800
-                    && x.status == Status::Pending
+        let mut w = FailWriter;
+        let err = st
+            .write_to(&mut w, |w, op| {
+                use std::io::Write as _;
+                writeln!(w, "{}", op.tx_id()).map_err(AppError::Io)?;
+                Ok(())
             })
-            .map(|(i, _)| i)
-            .collect();
+            .unwrap_err();
 
-        assert_eq!(idxs.len(), 2);
-        assert_eq!(idxs[1], idxs[0] + 1, "дубликаты по key должны стоять рядом");
+        match err {
+            AppError::Io(_) => {}
+            _ => panic!("Expected AppError::Io"),
+        }
+    }
+
+    #[test]
+    fn round_trip_using_test_format_read_and_write_strategies() {
+        // Checks that the statement can be written and then read back using matching strategies.
+        let ops = vec![
+            op_new(2, TransactionType::Transfer, 2, 3, 20, 110, Status::Failure, Some("x")),
+            op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None),
+            op_new(3, TransactionType::Withdrawal, 3, 0, 30, 120, Status::Pending, Some("y")),
+        ];
+        let mut st = statement_from_ops(ops, StatementMeta::default());
+
+        // Writer: one operation per line, pipe-separated; description "-" means None.
+        let mut bytes: Vec<u8> = Vec::new();
+        st.write_to(&mut bytes, |w, op| {
+            let t = match op.tx_type() {
+                TransactionType::Deposit => "D",
+                TransactionType::Transfer => "T",
+                TransactionType::Withdrawal => "W",
+            };
+            let s = match op.status() {
+                Status::Success => "S",
+                Status::Failure => "F",
+                Status::Pending => "P",
+            };
+            let d = op.description().unwrap_or("-");
+            use std::io::Write as _;
+            writeln!(
+                w,
+                "{}|{}|{}|{}|{}|{}|{}|{}",
+                op.tx_id(),
+                t,
+                op.from_user_id(),
+                op.to_user_id(),
+                op.amount(),
+                op.timestamp_ms(),
+                s,
+                d
+            )
+            .map_err(AppError::Io)?;
+            Ok(())
+        })
+        .unwrap();
+
+        // Reader: reads one line and parses it into Operation.
+        let mut input: &[u8] = &bytes;
+        let mut buf = io::BufReader::new(&mut input);
+
+        let st2 = Statement::from_read(&mut buf, |r| {
+            let mut line = String::new();
+            let n = io::BufRead::read_line(r, &mut line).map_err(AppError::Io)?;
+            if n == 0 {
+                return Ok(None);
+            }
+            let line = line.trim_end_matches(['\r', '\n']);
+            if line.trim().is_empty() {
+                return Ok(None);
+            }
+
+            let parts: Vec<&str> = line.split('|').collect();
+            if parts.len() != 8 {
+                return Err(AppError::BadLine {
+                    line_no: 0,
+                    line: line.to_string(),
+                    msg: format!("Expected 8 fields, got {}", parts.len()),
+                });
+            }
+
+            let tx_id: u64 = parts[0].parse().map_err(|_| AppError::BadLine {
+                line_no: 0,
+                line: line.to_string(),
+                msg: "Bad tx_id".to_string(),
+            })?;
+
+            let tx_type = match parts[1] {
+                "D" => TransactionType::Deposit,
+                "T" => TransactionType::Transfer,
+                "W" => TransactionType::Withdrawal,
+                _ => {
+                    return Err(AppError::BadLine {
+                        line_no: 0,
+                        line: line.to_string(),
+                        msg: "Bad tx_type".to_string(),
+                    })
+                }
+            };
+
+            let from_user_id: u64 = parts[2].parse().map_err(|_| AppError::BadLine {
+                line_no: 0,
+                line: line.to_string(),
+                msg: "Bad from_user_id".to_string(),
+            })?;
+            let to_user_id: u64 = parts[3].parse().map_err(|_| AppError::BadLine {
+                line_no: 0,
+                line: line.to_string(),
+                msg: "Bad to_user_id".to_string(),
+            })?;
+            let amount: i64 = parts[4].parse().map_err(|_| AppError::BadLine {
+                line_no: 0,
+                line: line.to_string(),
+                msg: "Bad amount".to_string(),
+            })?;
+            let timestamp_ms: u64 = parts[5].parse().map_err(|_| AppError::BadLine {
+                line_no: 0,
+                line: line.to_string(),
+                msg: "Bad timestamp_ms".to_string(),
+            })?;
+            let status = match parts[6] {
+                "S" => Status::Success,
+                "F" => Status::Failure,
+                "P" => Status::Pending,
+                _ => {
+                    return Err(AppError::BadLine {
+                        line_no: 0,
+                        line: line.to_string(),
+                        msg: "Bad status".to_string(),
+                    })
+                }
+            };
+            let desc = if parts[7] == "-" {
+                None
+            } else {
+                Some(parts[7].to_string())
+            };
+
+            Ok(Some(Operation::new(
+                tx_id,
+                tx_type,
+                from_user_id,
+                to_user_id,
+                amount,
+                timestamp_ms,
+                status,
+                desc,
+            )))
+        })
+        .unwrap();
+
+        let expected = statement_from_ops(
+            vec![
+                op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None),
+                op_new(2, TransactionType::Transfer, 2, 3, 20, 110, Status::Failure, Some("x")),
+                op_new(3, TransactionType::Withdrawal, 3, 0, 30, 120, Status::Pending, Some("y")),
+            ],
+            StatementMeta::default(),
+        );
+
+        assert_eq!(st2, expected);
+    }
+
+    // --- Nomenclature: AccountStatementType ---------------------------------
+
+    #[test]
+    fn account_statement_type_variants_exist() {
+        // Checks that all statement type variants exist and are publicly accessible.
+        let _ = AccountStatementType::YPBank;
+        let _ = AccountStatementType::MT940;
+        let _ = AccountStatementType::Camt053;
+        let _ = AccountStatementType::Sber;
     }
 }

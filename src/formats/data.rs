@@ -132,7 +132,7 @@ impl PartialOrd for Operation {
     }
 }
 
-use crate::error::AppError;
+use crate::errors::DataError;
 use std::io::{Read, Write};
 /// Структура хранения записки целиком
 /// Черты структуры: Display, Debug, PartialEq, Eq
@@ -161,9 +161,9 @@ impl Statement {
     pub fn from_read<R: Read, Next>(
         r: &mut R,
         mut next_op: Next,
-    ) -> Result<Self, AppError>
+    ) -> Result<Self, DataError>
     where
-        Next: FnMut(&mut R) -> Result<Option<Operation>, AppError>,
+        Next: FnMut(&mut R) -> Result<Option<Operation>, DataError>,
     {
         let mut st = Statement { operations: Vec::new(), meta: StatementMeta::default() };
 
@@ -178,9 +178,9 @@ impl Statement {
         &mut self,
         w: &mut W,
         mut write_op: F,
-    ) -> Result<(), AppError>
+    ) -> Result<(), DataError>
     where
-        F: FnMut(&mut W, &Operation) -> Result<(), AppError>,
+        F: FnMut(&mut W, &Operation) -> Result<(), DataError>,
     {
         // self.operations.sort_unstable();
 
@@ -577,8 +577,8 @@ mod tests {
         // Checks that from_read propagates errors produced by the next_op strategy.
         let mut r: &[u8] = b"x";
 
-        let err = Statement::from_read(&mut r, |_| -> Result<Option<Operation>, AppError> {
-            Err(AppError::BadLine {
+        let err = Statement::from_read(&mut r, |_| -> Result<Option<Operation>, DataError> {
+            Err(DataError::BadLine {
                 line_no: 1,
                 line: "x".to_string(),
                 msg: "boom".to_string(),
@@ -587,7 +587,7 @@ mod tests {
         .unwrap_err();
 
         match err {
-            AppError::BadLine { line_no, .. } => assert_eq!(line_no, 1),
+            DataError::BadLine { line_no, .. } => assert_eq!(line_no, 1),
             _ => panic!("Expected AppError::BadLine"),
         }
     }
@@ -639,13 +639,13 @@ mod tests {
         let err = st
             .write_to(&mut w, |w, op| {
                 use std::io::Write as _;
-                writeln!(w, "{}", op.tx_id()).map_err(AppError::Io)?;
+                writeln!(w, "{}", op.tx_id()).map_err(DataError::Io)?;
                 Ok(())
             })
             .unwrap_err();
 
         match err {
-            AppError::Io(_) => {}
+            DataError::Io(_) => {}
             _ => panic!("Expected AppError::Io"),
         }
     }
@@ -687,7 +687,7 @@ mod tests {
                 s,
                 d
             )
-            .map_err(AppError::Io)?;
+            .map_err(DataError::Io)?;
             Ok(())
         })
         .unwrap();
@@ -698,7 +698,7 @@ mod tests {
 
         let st2 = Statement::from_read(&mut buf, |r| {
             let mut line = String::new();
-            let n = io::BufRead::read_line(r, &mut line).map_err(AppError::Io)?;
+            let n = io::BufRead::read_line(r, &mut line).map_err(DataError::Io)?;
             if n == 0 {
                 return Ok(None);
             }
@@ -709,14 +709,14 @@ mod tests {
 
             let parts: Vec<&str> = line.split('|').collect();
             if parts.len() != 8 {
-                return Err(AppError::BadLine {
+                return Err(DataError::BadLine {
                     line_no: 0,
                     line: line.to_string(),
                     msg: format!("Expected 8 fields, got {}", parts.len()),
                 });
             }
 
-            let tx_id: u64 = parts[0].parse().map_err(|_| AppError::BadLine {
+            let tx_id: u64 = parts[0].parse().map_err(|_| DataError::BadLine {
                 line_no: 0,
                 line: line.to_string(),
                 msg: "Bad tx_id".to_string(),
@@ -727,7 +727,7 @@ mod tests {
                 "T" => TransactionType::Transfer,
                 "W" => TransactionType::Withdrawal,
                 _ => {
-                    return Err(AppError::BadLine {
+                    return Err(DataError::BadLine {
                         line_no: 0,
                         line: line.to_string(),
                         msg: "Bad tx_type".to_string(),
@@ -735,22 +735,22 @@ mod tests {
                 }
             };
 
-            let from_user_id: u64 = parts[2].parse().map_err(|_| AppError::BadLine {
+            let from_user_id: u64 = parts[2].parse().map_err(|_| DataError::BadLine {
                 line_no: 0,
                 line: line.to_string(),
                 msg: "Bad from_user_id".to_string(),
             })?;
-            let to_user_id: u64 = parts[3].parse().map_err(|_| AppError::BadLine {
+            let to_user_id: u64 = parts[3].parse().map_err(|_| DataError::BadLine {
                 line_no: 0,
                 line: line.to_string(),
                 msg: "Bad to_user_id".to_string(),
             })?;
-            let amount: i64 = parts[4].parse().map_err(|_| AppError::BadLine {
+            let amount: i64 = parts[4].parse().map_err(|_| DataError::BadLine {
                 line_no: 0,
                 line: line.to_string(),
                 msg: "Bad amount".to_string(),
             })?;
-            let timestamp_ms: u64 = parts[5].parse().map_err(|_| AppError::BadLine {
+            let timestamp_ms: u64 = parts[5].parse().map_err(|_| DataError::BadLine {
                 line_no: 0,
                 line: line.to_string(),
                 msg: "Bad timestamp_ms".to_string(),
@@ -760,7 +760,7 @@ mod tests {
                 "F" => Status::Failure,
                 "P" => Status::Pending,
                 _ => {
-                    return Err(AppError::BadLine {
+                    return Err(DataError::BadLine {
                         line_no: 0,
                         line: line.to_string(),
                         msg: "Bad status".to_string(),

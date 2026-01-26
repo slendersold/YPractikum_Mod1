@@ -1,7 +1,7 @@
 mod formats;
 
 pub use formats::{
-    error,
+    errors,
     ypbank,
     data
 };

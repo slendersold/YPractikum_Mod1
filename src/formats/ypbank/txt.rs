@@ -14,18 +14,17 @@ use crate::errors::{DataError, ParseErrorKind, Result};
 use crate::formats::data::{Operation, Status, TransactionType};
 
 use crate::formats::ypbank::fields::{
-    K_TX_ID,
-    K_TX_TYPE,
-    K_FROM_USER_ID,
-    K_TO_USER_ID,
     K_AMOUNT,
-    K_TIMESTAMP,
-    K_STATUS,
     K_DESCRIPTION,
     // K_RECORD_SIZE,
     // K_MAGIC,
+    K_FROM_USER_ID,
+    K_STATUS,
+    K_TIMESTAMP,
+    K_TO_USER_ID,
+    K_TX_ID,
+    K_TX_TYPE,
 };
-
 
 /// Построитель операции из распарсенных полей
 #[derive(Default)]
@@ -154,12 +153,7 @@ impl<'a, R: Read> YPBankText<'a, R> {
     /// Парсит строку `KEY: VALUE` -> (KEY, VALUE).
     fn parse_kv<'s>(&self, line: &'s str) -> Result<(&'s str, &'s str)> {
         let (k, v) = line.split_once(':').ok_or_else(|| {
-            crate::parse_err!(
-                self.line_no,
-                None,
-                ParseErrorKind::ExpectedKeyValue,
-                line
-            )
+            crate::parse_err!(self.line_no, None, ParseErrorKind::ExpectedKeyValue, line)
         })?;
 
         Ok((k.trim(), v.trim()))
@@ -198,7 +192,9 @@ impl<'a, R: Read> YPBankText<'a, R> {
             return Err(crate::parse_err!(
                 self.line_no,
                 Some(field),
-                ParseErrorKind::NegativeNotAllowed { value: s.to_string() },
+                ParseErrorKind::NegativeNotAllowed {
+                    value: s.to_string()
+                },
                 line
             ));
         }
@@ -248,7 +244,9 @@ impl<'a, R: Read> YPBankText<'a, R> {
             return Err(crate::parse_err!(
                 self.line_no,
                 Some(K_DESCRIPTION),
-                ParseErrorKind::BadQuotedString { value: s.to_string() },
+                ParseErrorKind::BadQuotedString {
+                    value: s.to_string()
+                },
                 line
             ));
         }
@@ -326,7 +324,12 @@ impl<'a, R: Read> YPBankText<'a, R> {
                     b.tx_type = Some(self.parse_tx_type(v, raw_line)?);
                 }
                 K_FROM_USER_ID => {
-                    OpBuilder::ensure_empty(&b.from_user_id, self.line_no, K_FROM_USER_ID, raw_line)?;
+                    OpBuilder::ensure_empty(
+                        &b.from_user_id,
+                        self.line_no,
+                        K_FROM_USER_ID,
+                        raw_line,
+                    )?;
                     b.from_user_id = Some(self.parse_u64(v, K_FROM_USER_ID, raw_line)?);
                 }
                 K_TO_USER_ID => {

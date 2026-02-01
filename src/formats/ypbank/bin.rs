@@ -15,21 +15,19 @@ use crate::errors::{DataError, ParseError, ParseErrorKind, Result};
 use crate::formats::data::{Operation, Status, TransactionType};
 
 use crate::formats::ypbank::fields::{
-    // K_TX_ID,
-    K_TX_TYPE,
+    K_DESCRIPTION,
     K_FROM_USER_ID,
-    K_TO_USER_ID,
+    K_RECORD_SIZE,
+    // K_MAGIC,
     // K_AMOUNT,
     // K_TIMESTAMP,
     K_STATUS,
-    K_DESCRIPTION,
-    K_RECORD_SIZE,
-    // K_MAGIC,
+    K_TO_USER_ID,
+    // K_TX_ID,
+    K_TX_TYPE,
 };
 
 const MAGIC: [u8; 4] = *b"YPBN";
-
-
 
 fn err(line_no: usize, field: Option<&'static str>, kind: ParseErrorKind, line: &str) -> DataError {
     DataError::from(ParseError::full(line_no, field, kind, line))
@@ -216,7 +214,8 @@ impl<'a, R: Read> YPBankBin<'a, R> {
         let tx_type = {
             let mut b = [0u8; 1];
             cur.read_exact(&mut b).map_err(DataError::Io)?;
-            self.decode_tx_type(b[0]).map_err(|k| err(self.rec_no, Some(K_TX_TYPE), k, ""))?
+            self.decode_tx_type(b[0])
+                .map_err(|k| err(self.rec_no, Some(K_TX_TYPE), k, ""))?
         };
 
         let from_user_id = {
@@ -246,7 +245,8 @@ impl<'a, R: Read> YPBankBin<'a, R> {
         let status = {
             let mut b = [0u8; 1];
             cur.read_exact(&mut b).map_err(DataError::Io)?;
-            self.decode_status(b[0]).map_err(|k| err(self.rec_no, Some(K_STATUS), k, ""))?
+            self.decode_status(b[0])
+                .map_err(|k| err(self.rec_no, Some(K_STATUS), k, ""))?
         };
 
         let desc_len = {
@@ -284,7 +284,7 @@ impl<'a, R: Read> YPBankBin<'a, R> {
                             msg: "DESCRIPTION не является корректным UTF-8",
                         },
                         &e.to_string(),
-                    ))
+                    ));
                 }
             }
         };
@@ -334,7 +334,7 @@ impl<'a, R: Read> YPBankBin<'a, R> {
                         msg: "DESCRIPTION слишком длинное для u32",
                     },
                     "",
-                ))
+                ));
             }
         };
 
@@ -361,13 +361,14 @@ impl<'a, R: Read> YPBankBin<'a, R> {
                         msg: "Тело записи слишком большое для u32",
                     },
                     "",
-                ))
+                ));
             }
         };
 
         // HEADER
         w.write_all(&MAGIC).map_err(DataError::Io)?;
-        w.write_all(&record_size_u32.to_be_bytes()).map_err(DataError::Io)?;
+        w.write_all(&record_size_u32.to_be_bytes())
+            .map_err(DataError::Io)?;
         w.write_all(&body).map_err(DataError::Io)?;
         Ok(())
     }
@@ -378,7 +379,9 @@ impl<'a, R: Read> YPBankBin<'a, R> {
 ///
 /// Стратегия хранит состояние парсера (BufReader, синхронизация, счётчик записей) внутри замыкания.
 ///
-pub fn make_next_op<'a, R: Read>(r: &'a mut R) -> impl FnMut(&mut R) -> Result<Option<Operation>> + 'a {
+pub fn make_next_op<'a, R: Read>(
+    r: &'a mut R,
+) -> impl FnMut(&mut R) -> Result<Option<Operation>> + 'a {
     let mut parser = YPBankBin::new(r);
     move |_rr: &mut R| parser.next_op()
 }

@@ -58,53 +58,17 @@ impl OpBuilder {
         Ok(())
     }
 
-    /// Сборка Operation и проверка полноты полей
-    fn build(self, line_no: usize) -> Result<Operation> {
-        let mut missing: Vec<&'static str> = Vec::new();
-
-        if self.tx_id.is_none() {
-            missing.push(K_TX_ID);
-        }
-        if self.tx_type.is_none() {
-            missing.push(K_TX_TYPE);
-        }
-        if self.from_user_id.is_none() {
-            missing.push(K_FROM_USER_ID);
-        }
-        if self.to_user_id.is_none() {
-            missing.push(K_TO_USER_ID);
-        }
-        if self.amount.is_none() {
-            missing.push(K_AMOUNT);
-        }
-        if self.timestamp_ms.is_none() {
-            missing.push(K_TIMESTAMP);
-        }
-        if self.status.is_none() {
-            missing.push(K_STATUS);
-        }
-        if self.description.is_none() {
-            missing.push(K_DESCRIPTION);
-        }
-
-        if !missing.is_empty() {
-            return Err(DataError::from(crate::errors::ParseError::full(
-                line_no,
-                None,
-                ParseErrorKind::MissingFields { names: missing },
-                "",
-            )));
-        }
-
+    /// Сборка Operation с плейсхолдерами для отсутствующих полей.
+    fn build(self, _line_no: usize) -> Result<Operation> {
         Ok(Operation::new(
-            self.tx_id.unwrap(),
-            self.tx_type.unwrap(),
-            self.from_user_id.unwrap(),
-            self.to_user_id.unwrap(),
-            self.amount.unwrap(),
-            self.timestamp_ms.unwrap(),
-            self.status.unwrap(),
-            self.description,
+            self.tx_id.unwrap_or(0),
+            self.tx_type.unwrap_or(TransactionType::Deposit),
+            self.from_user_id.unwrap_or(0),
+            self.to_user_id.unwrap_or(0),
+            self.amount.unwrap_or(0),
+            self.timestamp_ms.unwrap_or(0),
+            self.status.unwrap_or(Status::Success),
+            self.description.or(Some(String::new())),
         ))
     }
 }
@@ -161,6 +125,10 @@ impl<'a, R: Read> YPBankText<'a, R> {
 
     /// Парсит u64 с унифицированной ошибкой.
     fn parse_u64(&self, s: &str, field: &'static str, line: &str) -> Result<u64> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Ok(0);
+        }
         s.parse::<u64>().map_err(|_| {
             crate::parse_err!(
                 self.line_no,
@@ -176,6 +144,10 @@ impl<'a, R: Read> YPBankText<'a, R> {
 
     /// Парсит i64 >= 0 с унифицированной ошибкой.
     fn parse_i64_nonneg(&self, s: &str, field: &'static str, line: &str) -> Result<i64> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Ok(0);
+        }
         let v = s.parse::<i64>().map_err(|_| {
             crate::parse_err!(
                 self.line_no,
@@ -203,6 +175,10 @@ impl<'a, R: Read> YPBankText<'a, R> {
 
     /// Парсит TX_TYPE.
     fn parse_tx_type(&self, s: &str, line: &str) -> Result<TransactionType> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Ok(TransactionType::Deposit);
+        }
         match s {
             "DEPOSIT" => Ok(TransactionType::Deposit),
             "TRANSFER" => Ok(TransactionType::Transfer),
@@ -221,6 +197,10 @@ impl<'a, R: Read> YPBankText<'a, R> {
 
     /// Парсит STATUS.
     fn parse_status(&self, s: &str, line: &str) -> Result<Status> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Ok(Status::Success);
+        }
         match s {
             "SUCCESS" => Ok(Status::Success),
             "FAILURE" => Ok(Status::Failure),
@@ -240,6 +220,9 @@ impl<'a, R: Read> YPBankText<'a, R> {
     /// Парсит DESCRIPTION в двойных кавычках.
     fn parse_description(&self, s: &str, line: &str) -> Result<String> {
         let s = s.trim();
+        if s.is_empty() {
+            return Ok(String::new());
+        }
         if !s.starts_with('"') || !s.ends_with('"') || s.len() < 2 {
             return Err(crate::parse_err!(
                 self.line_no,

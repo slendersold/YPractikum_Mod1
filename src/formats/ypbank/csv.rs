@@ -107,6 +107,10 @@ impl<'a, R: Read> YPBankCsv<'a, R> {
     }
 
     fn parse_u64(&self, s: &str, field: &'static str, line: &str) -> Result<u64> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Ok(0);
+        }
         s.parse::<u64>().map_err(|_| {
             err(
                 self.line_no,
@@ -121,6 +125,10 @@ impl<'a, R: Read> YPBankCsv<'a, R> {
     }
 
     fn parse_i64_nonneg(&self, s: &str, field: &'static str, line: &str) -> Result<i64> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Ok(0);
+        }
         let v = s.parse::<i64>().map_err(|_| {
             err(
                 self.line_no,
@@ -147,6 +155,10 @@ impl<'a, R: Read> YPBankCsv<'a, R> {
     }
 
     fn parse_tx_type(&self, s: &str, line: &str) -> Result<TransactionType> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Ok(TransactionType::Deposit);
+        }
         match s {
             "DEPOSIT" => Ok(TransactionType::Deposit),
             "TRANSFER" => Ok(TransactionType::Transfer),
@@ -164,6 +176,10 @@ impl<'a, R: Read> YPBankCsv<'a, R> {
     }
 
     fn parse_status(&self, s: &str, line: &str) -> Result<Status> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Ok(Status::Success);
+        }
         match s {
             "SUCCESS" => Ok(Status::Success),
             "FAILURE" => Ok(Status::Failure),
@@ -184,6 +200,9 @@ impl<'a, R: Read> YPBankCsv<'a, R> {
     /// Экранирование кавычек внутри не поддерживается (в спецификации не описано).
     fn parse_description(&self, s: &str, line: &str) -> Result<String> {
         let s = s.trim();
+        if s.is_empty() {
+            return Ok(String::new());
+        }
         if !s.starts_with('"') || !s.ends_with('"') || s.len() < 2 {
             return Err(err(
                 self.line_no,

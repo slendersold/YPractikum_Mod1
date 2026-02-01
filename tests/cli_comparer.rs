@@ -1,14 +1,17 @@
 //! Интеграционные тесты для CLI-сравнивателя.
 
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-fn sample_path(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("YPbank_formats")
-        .join("sample_files")
-        .join(name)
+fn write_temp_file(name: &str, contents: &str) -> std::path::PathBuf {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("ypbank_{name}_{ts}.tmp"));
+    fs::write(&path, contents).expect("write temp file");
+    path
 }
 
 fn run_compare(args: &[&str]) -> (i32, String, String) {
@@ -25,19 +28,36 @@ fn run_compare(args: &[&str]) -> (i32, String, String) {
 
 #[test]
 fn compares_sample_files_across_formats_as_identical() {
-    let bin = sample_path("records_example.bin");
-    let csv = sample_path("records_example.csv");
+    let csv = write_temp_file(
+        "a",
+        "TX_ID,TX_TYPE,FROM_USER_ID,TO_USER_ID,AMOUNT,TIMESTAMP,STATUS,DESCRIPTION\n\
+1,DEPOSIT,0,1,100,123,SUCCESS,\"Test\"",
+    );
+    let txt = write_temp_file(
+        "b",
+        "TX_ID: 1\n\
+TX_TYPE: DEPOSIT\n\
+FROM_USER_ID: 0\n\
+TO_USER_ID: 1\n\
+AMOUNT: 100\n\
+TIMESTAMP: 123\n\
+STATUS: SUCCESS\n\
+DESCRIPTION: \"Test\"\n",
+    );
 
     let (code, stdout, stderr) = run_compare(&[
         "--file1",
-        bin.to_str().unwrap(),
-        "--format1",
-        "bin",
-        "--file2",
         csv.to_str().unwrap(),
-        "--format2",
+        "--format1",
         "csv",
+        "--file2",
+        txt.to_str().unwrap(),
+        "--format2",
+        "txt",
     ]);
+
+    let _ = fs::remove_file(&csv);
+    let _ = fs::remove_file(&txt);
 
     assert_eq!(code, 0, "stderr: {stderr}");
     assert!(stdout.contains("identical"), "stdout: {stdout}");
@@ -45,42 +65,16 @@ fn compares_sample_files_across_formats_as_identical() {
 
 #[test]
 fn reports_mismatch_for_different_files() {
-    let csv = sample_path("records_example.csv");
-    let tmp_dir = std::env::temp_dir();
-    let tmp_file = tmp_dir.join("records_example_short.csv");
-
-    let content = fs::read_to_string(&csv).expect("read sample csv");
-    let lines: Vec<&str> = content.lines().collect();
-    assert!(
-        lines.len() > 1,
-        "csv must have header and at least one record"
+    let csv = write_temp_file(
+        "c",
+        "TX_ID,TX_TYPE,FROM_USER_ID,TO_USER_ID,AMOUNT,TIMESTAMP,STATUS,DESCRIPTION\n\
+1,DEPOSIT,0,1,100,123,SUCCESS,\"Test\"",
     );
-
-    let header = lines[0];
-    let first = lines[1].to_string();
-    let mut parts = first.splitn(8, ',');
-    let p0 = parts.next().unwrap_or("");
-    let p1 = parts.next().unwrap_or("");
-    let p2 = parts.next().unwrap_or("");
-    let p3 = parts.next().unwrap_or("");
-    let p4 = parts.next().unwrap_or("");
-    let p5 = parts.next().unwrap_or("");
-    let p6 = parts.next().unwrap_or("");
-    let p7 = parts.next().unwrap_or("");
-
-    let new_amount = if p4 == "0" { "1" } else { "0" };
-    let mutated_first = format!("{p0},{p1},{p2},{p3},{new_amount},{p5},{p6},{p7}");
-
-    let mut out = String::new();
-    out.push_str(header);
-    out.push('\n');
-    out.push_str(&mutated_first);
-    for line in lines.iter().skip(2) {
-        out.push('\n');
-        out.push_str(line);
-    }
-
-    fs::write(&tmp_file, out).expect("write mutated csv");
+    let csv_changed = write_temp_file(
+        "d",
+        "TX_ID,TX_TYPE,FROM_USER_ID,TO_USER_ID,AMOUNT,TIMESTAMP,STATUS,DESCRIPTION\n\
+1,DEPOSIT,0,1,101,123,SUCCESS,\"Test\"",
+    );
 
     let (code, stdout, stderr) = run_compare(&[
         "--file1",
@@ -88,12 +82,13 @@ fn reports_mismatch_for_different_files() {
         "--format1",
         "csv",
         "--file2",
-        tmp_file.to_str().unwrap(),
+        csv_changed.to_str().unwrap(),
         "--format2",
         "csv",
     ]);
 
-    let _ = fs::remove_file(&tmp_file);
+    let _ = fs::remove_file(&csv);
+    let _ = fs::remove_file(&csv_changed);
 
     assert_eq!(code, 0, "stderr: {stderr}");
     assert!(stdout.contains("different"), "stdout: {stdout}");

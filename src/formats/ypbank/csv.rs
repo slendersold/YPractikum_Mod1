@@ -14,20 +14,19 @@ use std::io::{self, BufRead, Read, Write};
 use crate::errors::{DataError, ParseError, ParseErrorKind, Result};
 use crate::formats::data::{Operation, Status, TransactionType};
 
-const HEADER: &str =
-    "TX_ID,TX_TYPE,FROM_USER_ID,TO_USER_ID,AMOUNT,TIMESTAMP,STATUS,DESCRIPTION";
+const HEADER: &str = "TX_ID,TX_TYPE,FROM_USER_ID,TO_USER_ID,AMOUNT,TIMESTAMP,STATUS,DESCRIPTION";
 
 use crate::formats::ypbank::fields::{
-    K_TX_ID,
-    K_TX_TYPE,
-    K_FROM_USER_ID,
-    K_TO_USER_ID,
     K_AMOUNT,
-    K_TIMESTAMP,
-    K_STATUS,
     K_DESCRIPTION,
     // K_RECORD_SIZE,
     // K_MAGIC,
+    K_FROM_USER_ID,
+    K_STATUS,
+    K_TIMESTAMP,
+    K_TO_USER_ID,
+    K_TX_ID,
+    K_TX_TYPE,
 };
 
 fn err(line_no: usize, field: Option<&'static str>, kind: ParseErrorKind, line: &str) -> DataError {
@@ -206,7 +205,16 @@ impl<'a, R: Read> YPBankCsv<'a, R> {
     fn split_8_fields<'b>(
         &self,
         line: &'b str,
-    ) -> Result<(&'b str, &'b str, &'b str, &'b str, &'b str, &'b str, &'b str, &'b str)> {
+    ) -> Result<(
+        &'b str,
+        &'b str,
+        &'b str,
+        &'b str,
+        &'b str,
+        &'b str,
+        &'b str,
+        &'b str,
+    )> {
         // Находим позиции первых 7 запятых
         let mut idxs = [0usize; 7];
         let mut found = 0usize;
@@ -376,7 +384,9 @@ impl<'a, R: Read> YPBankCsv<'a, R> {
 ///
 /// Стратегия хранит состояние парсера (BufReader, заголовок, line_no) внутри замыкания.
 ///
-pub fn make_next_op<'a, R: Read>(r: &'a mut R) -> impl FnMut(&mut R) -> Result<Option<Operation>> + 'a {
+pub fn make_next_op<'a, R: Read>(
+    r: &'a mut R,
+) -> impl FnMut(&mut R) -> Result<Option<Operation>> + 'a {
     let mut parser = YPBankCsv::new(r);
     move |_rr: &mut R| parser.next_op()
 }

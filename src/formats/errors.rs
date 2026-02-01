@@ -1,3 +1,5 @@
+//! Ошибки парсинга/формата и тип результата для библиотеки.
+
 use std::{fmt, io};
 
 /// Единый Result для всего проекта
@@ -68,7 +70,10 @@ pub enum ParseErrorKind {
     NegativeNotAllowed { value: String },
 
     /// Значение не входит в допустимые перечисления (TX_TYPE/STATUS)
-    BadEnum { value: String, expected: &'static str },
+    BadEnum {
+        value: String,
+        expected: &'static str,
+    },
 
     /// Ожидалась строка в двойных кавычках
     BadQuotedString { value: String },
@@ -155,9 +160,15 @@ impl fmt::Display for ParseError {
             DuplicateField { name } => write!(f, "{where_}: duplicate field `{name}`"),
             MissingFields { names } => write!(f, "{where_}: missing fields: {}", names.join(", ")),
             BadNumber { value, ty } => write!(f, "{where_}: bad {ty} number `{value}`"),
-            NegativeNotAllowed { value } => write!(f, "{where_}: negative value not allowed `{value}`"),
-            BadEnum { value, expected } => write!(f, "{where_}: bad value `{value}`, expected {expected}"),
-            BadQuotedString { value } => write!(f, "{where_}: expected quoted string, got `{value}`"),
+            NegativeNotAllowed { value } => {
+                write!(f, "{where_}: negative value not allowed `{value}`")
+            }
+            BadEnum { value, expected } => {
+                write!(f, "{where_}: bad value `{value}`, expected {expected}")
+            }
+            BadQuotedString { value } => {
+                write!(f, "{where_}: expected quoted string, got `{value}`")
+            }
             SemanticRule { msg } => write!(f, "{where_}: {msg}"),
         }?;
 
@@ -180,10 +191,7 @@ impl fmt::Display for ParseError {
 macro_rules! parse_err {
     ($line_no:expr, $field:expr, $kind:expr, $line:expr) => {{
         $crate::errors::DataError::from($crate::errors::ParseError::full(
-            $line_no,
-            $field,
-            $kind,
-            $line,
+            $line_no, $field, $kind, $line,
         ))
     }};
 }

@@ -1,49 +1,43 @@
-/// здесь должны находиться все типы хранения информации
+//! Доменная модель: операции, выписки и связанные типы.
+
+/// Здесь находятся все типы хранения информации.
 use std::cmp::Ordering;
 // use std::collections::HashMap;
 
-
-/// Перечисление возможных типов транзакции
-/// Черты перечисления: Debug, Clone, PartialEq, PartialOrd, Eq, Ord
+/// Возможные типы транзакции.
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub enum TransactionType {
     Deposit,
     Transfer,
-    Withdrawal
+    Withdrawal,
 }
 
-/// Перечисление возможных результатов транзакции
-/// Черты перечисления: Debug, Clone, PartialEq, PartialOrd, Eq, Ord
+/// Возможные статусы транзакции.
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub enum Status {
     Success,
     Failure,
-    Pending
+    Pending,
 }
 
-
-/// Перечисление возможных типов записки
-/// Черты перечисления: Debug, Clone
+/// Возможные типы выписок (для классификации источника).
 #[derive(Debug)]
 pub enum AccountStatementType {
     YPBank,
     MT940,
     Camt053,
-    Sber
+    Sber,
 }
 
-/// Структура метаданных записки: Информация из шапки или в целом информация
-/// Черты структуры: Display, Debug, Default
+/// Метаданные выписки (происхождение и служебные поля).
 #[derive(Debug, Default)]
 pub struct StatementMeta {
-    pub source: Option<String>,   // например "YPBankCsv"
+    pub source: Option<String>, // например "YPBankCsv"
     pub account_id: Option<String>,
     pub generated_at_ms: Option<u64>,
 }
 
-
-/// Структура описания одной операции
-/// Черты структуры: Display, Debug, PartialEq, Eq, Ord, PartialOrd
+/// Описание одной операции.
 #[derive(Debug)]
 pub struct Operation {
     tx_id: u64,
@@ -56,9 +50,8 @@ pub struct Operation {
     description: Option<String>,
 }
 
-
-
 impl Operation {
+    /// Создает новую операцию.
     pub fn new(
         tx_id: u64,
         tx_type: TransactionType,
@@ -81,25 +74,50 @@ impl Operation {
         }
     }
 
-    // Геттеры нужны для write_to (иначе не достать поля извне impl Operation/Statement)
-    pub fn tx_id(&self) -> u64 { self.tx_id }
-    pub fn tx_type(&self) -> &TransactionType { &self.tx_type }
-    pub fn from_user_id(&self) -> u64 { self.from_user_id }
-    pub fn to_user_id(&self) -> u64 { self.to_user_id }
-    pub fn amount(&self) -> i64 { self.amount }
-    pub fn timestamp_ms(&self) -> u64 { self.timestamp_ms }
-    pub fn status(&self) -> &Status { &self.status }
-    pub fn description(&self) -> Option<&str> { self.description.as_deref() }
+    /// Возвращает идентификатор транзакции.
+    pub fn tx_id(&self) -> u64 {
+        self.tx_id
+    }
+    /// Возвращает тип транзакции.
+    pub fn tx_type(&self) -> &TransactionType {
+        &self.tx_type
+    }
+    /// Возвращает идентификатор отправителя.
+    pub fn from_user_id(&self) -> u64 {
+        self.from_user_id
+    }
+    /// Возвращает идентификатор получателя.
+    pub fn to_user_id(&self) -> u64 {
+        self.to_user_id
+    }
+    /// Возвращает сумму транзакции.
+    pub fn amount(&self) -> i64 {
+        self.amount
+    }
+    /// Возвращает временную метку.
+    pub fn timestamp_ms(&self) -> u64 {
+        self.timestamp_ms
+    }
+    /// Возвращает статус транзакции.
+    pub fn status(&self) -> &Status {
+        &self.status
+    }
+    /// Возвращает описание, если есть.
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
 
-        #[inline]
+    #[inline]
     /// Выделяет ключевые элементы структуры в кортеж ссылок
-    fn key(&self) -> (
-        &u64,               // tx_id
+    fn key(
+        &self,
+    ) -> (
+        &u64, // tx_id
         &TransactionType,
-        &u64,               // from_user_id
-        &u64,               // to_user_id
-        &i64,               // amount
-        &u64,               // timestamp_ms
+        &u64, // from_user_id
+        &u64, // to_user_id
+        &i64, // amount
+        &u64, // timestamp_ms
         &Status,
     ) {
         (
@@ -134,8 +152,7 @@ impl PartialOrd for Operation {
 
 use crate::errors::DataError;
 use std::io::{Read, Write};
-/// Структура хранения записки целиком
-/// Черты структуры: Display, Debug, PartialEq, Eq
+/// Выписка целиком (набор операций + метаданные).
 #[derive(Debug)]
 pub struct Statement {
     operations: Vec<Operation>,
@@ -143,7 +160,7 @@ pub struct Statement {
 }
 // Методы для добавления данных
 impl Statement {
-    /// Добавить одну запись в порядке возрастания
+    /// Добавляет одну операцию с сохранением сортировки.
     pub fn append(&mut self, op: Operation) {
         let idx = match self.operations.binary_search(&op) {
             Ok(i) | Err(i) => i,
@@ -151,21 +168,22 @@ impl Statement {
         self.operations.insert(idx, op);
     }
 
-    /// Добавить группу записей в векторе с последующей сортировкой
+    /// Добавляет несколько операций и сортирует один раз.
     // Если нужно “добавить пачку”, выгоднее append + sort один раз:
     pub fn extend_and_sort(&mut self, mut ops: Vec<Operation>) {
         self.operations.append(&mut ops);
         self.operations.sort_unstable(); // Ord без description
     }
 
-    pub fn from_read<R: Read, Next>(
-        r: &mut R,
-        mut next_op: Next,
-    ) -> Result<Self, DataError>
+    /// Читает операции через стратегию `next_op` и строит выписку.
+    pub fn from_read<R: Read, Next>(r: &mut R, mut next_op: Next) -> Result<Self, DataError>
     where
         Next: FnMut(&mut R) -> Result<Option<Operation>, DataError>,
     {
-        let mut st = Statement { operations: Vec::new(), meta: StatementMeta::default() };
+        let mut st = Statement {
+            operations: Vec::new(),
+            meta: StatementMeta::default(),
+        };
 
         while let Some(op) = next_op(r)? {
             st.append(op);
@@ -174,11 +192,8 @@ impl Statement {
         Ok(st)
     }
 
-    pub fn write_to<W: Write, F>(
-        &mut self,
-        w: &mut W,
-        mut write_op: F,
-    ) -> Result<(), DataError>
+    /// Записывает операции через стратегию `write_op`.
+    pub fn write_to<W: Write, F>(&mut self, w: &mut W, mut write_op: F) -> Result<(), DataError>
     where
         F: FnMut(&mut W, &Operation) -> Result<(), DataError>,
     {
@@ -197,7 +212,7 @@ impl PartialEq for Statement {
     fn eq(&self, other: &Self) -> bool {
         // попробуем сначала проверку двух отсортированных массивов
         self.operations == other.operations
-        // // Ранний выход, можно попробовать в будущем поменять на истинное частичное сравнение, 
+        // // Ранний выход, можно попробовать в будущем поменять на истинное частичное сравнение,
         // // когда проверяется один список на подмножество другого
         // if self.operations.len() != other.operations.len() {
         //     return false;
@@ -350,64 +365,208 @@ mod tests {
     #[test]
     fn operation_ord_primary_by_tx_id() {
         // Checks that tx_id is the primary ordering key.
-        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op_new(2, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        let a = op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
+        let b = op_new(
+            2,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
         assert!(a < b);
     }
 
     #[test]
     fn operation_ord_then_by_tx_type() {
         // Checks that tx_type participates in ordering after tx_id.
-        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op_new(1, TransactionType::Transfer, 1, 2, 10, 100, Status::Success, None);
+        let a = op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
+        let b = op_new(
+            1,
+            TransactionType::Transfer,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
         assert!(a < b);
     }
 
     #[test]
     fn operation_ord_then_by_from_user_id() {
         // Checks that from_user_id participates in ordering after tx_type.
-        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op_new(1, TransactionType::Deposit, 2, 2, 10, 100, Status::Success, None);
+        let a = op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
+        let b = op_new(
+            1,
+            TransactionType::Deposit,
+            2,
+            2,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
         assert!(a < b);
     }
 
     #[test]
     fn operation_ord_then_by_to_user_id() {
         // Checks that to_user_id participates in ordering after from_user_id.
-        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op_new(1, TransactionType::Deposit, 1, 3, 10, 100, Status::Success, None);
+        let a = op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
+        let b = op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            3,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
         assert!(a < b);
     }
 
     #[test]
     fn operation_ord_then_by_amount_including_negative() {
         // Checks that amount participates in ordering and handles negative values.
-        let a = op_new(1, TransactionType::Deposit, 1, 2, -5, 100, Status::Success, None);
-        let b = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        let a = op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            -5,
+            100,
+            Status::Success,
+            None,
+        );
+        let b = op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
         assert!(a < b);
     }
 
     #[test]
     fn operation_ord_then_by_timestamp() {
         // Checks that timestamp_ms participates in ordering after amount.
-        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op_new(1, TransactionType::Deposit, 1, 2, 10, 200, Status::Success, None);
+        let a = op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
+        let b = op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            200,
+            Status::Success,
+            None,
+        );
         assert!(a < b);
     }
 
     #[test]
     fn operation_ord_then_by_status() {
         // Checks that status participates in ordering after timestamp_ms.
-        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Failure, None);
+        let a = op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
+        let b = op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Failure,
+            None,
+        );
         assert!(a < b);
     }
 
     #[test]
     fn operation_partial_ord_is_total_order() {
         // Checks that partial_cmp is consistent with cmp and forms a total order.
-        let a = op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
-        let b = op_new(2, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None);
+        let a = op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
+        let b = op_new(
+            2,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            None,
+        );
 
         assert_eq!(a.partial_cmp(&b), Some(std::cmp::Ordering::Less));
         assert_eq!(b.partial_cmp(&a), Some(std::cmp::Ordering::Greater));
@@ -422,9 +581,36 @@ mod tests {
         let mut st = empty_statement();
         st.meta = meta("TestSource", "acc-1", 123);
 
-        st.append(op_new(2, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None));
-        st.append(op_new(1, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None));
-        st.append(op_new(3, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None));
+        st.append(op_new(
+            2,
+            TransactionType::Deposit,
+            1,
+            1,
+            10,
+            100,
+            Status::Success,
+            None,
+        ));
+        st.append(op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            1,
+            10,
+            100,
+            Status::Success,
+            None,
+        ));
+        st.append(op_new(
+            3,
+            TransactionType::Deposit,
+            1,
+            1,
+            10,
+            100,
+            Status::Success,
+            None,
+        ));
 
         let keys = collect_keys_via_write_to(&mut st);
         assert_eq!(keys.len(), 3);
@@ -439,9 +625,36 @@ mod tests {
         // Checks that ordering depends on the full Operation key tuple.
         let mut st = empty_statement();
 
-        st.append(op_new(1, TransactionType::Transfer, 2, 1, 5, 100, Status::Success, None));
-        st.append(op_new(1, TransactionType::Deposit, 2, 1, 5, 100, Status::Success, None));
-        st.append(op_new(1, TransactionType::Withdrawal, 1, 1, 5, 100, Status::Success, None));
+        st.append(op_new(
+            1,
+            TransactionType::Transfer,
+            2,
+            1,
+            5,
+            100,
+            Status::Success,
+            None,
+        ));
+        st.append(op_new(
+            1,
+            TransactionType::Deposit,
+            2,
+            1,
+            5,
+            100,
+            Status::Success,
+            None,
+        ));
+        st.append(op_new(
+            1,
+            TransactionType::Withdrawal,
+            1,
+            1,
+            5,
+            100,
+            Status::Success,
+            None,
+        ));
 
         let keys = collect_keys_via_write_to(&mut st);
         assert_eq!(keys.len(), 3);
@@ -458,8 +671,26 @@ mod tests {
         // Checks that two operations equal by key can coexist and remain adjacent.
         let mut st = empty_statement();
 
-        st.append(op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, Some("a")));
-        st.append(op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, Some("b")));
+        st.append(op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            Some("a"),
+        ));
+        st.append(op_new(
+            1,
+            TransactionType::Deposit,
+            1,
+            2,
+            10,
+            100,
+            Status::Success,
+            Some("b"),
+        ));
 
         let keys = collect_keys_via_write_to(&mut st);
         assert_eq!(keys.len(), 2);
@@ -471,13 +702,58 @@ mod tests {
     fn extend_and_sort_sorts_once_and_keeps_duplicates() {
         // Checks that extend_and_sort sorts combined data and keeps duplicates by key.
         let mut st = empty_statement();
-        st.append(op_new(5, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None));
+        st.append(op_new(
+            5,
+            TransactionType::Deposit,
+            1,
+            1,
+            10,
+            100,
+            Status::Success,
+            None,
+        ));
 
         let batch = vec![
-            op_new(3, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
-            op_new(1, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
-            op_new(4, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
-            op_new(2, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
+            op_new(
+                3,
+                TransactionType::Deposit,
+                1,
+                1,
+                10,
+                100,
+                Status::Success,
+                None,
+            ),
+            op_new(
+                1,
+                TransactionType::Deposit,
+                1,
+                1,
+                10,
+                100,
+                Status::Success,
+                None,
+            ),
+            op_new(
+                4,
+                TransactionType::Deposit,
+                1,
+                1,
+                10,
+                100,
+                Status::Success,
+                None,
+            ),
+            op_new(
+                2,
+                TransactionType::Deposit,
+                1,
+                1,
+                10,
+                100,
+                Status::Success,
+                None,
+            ),
             op_new(
                 2,
                 TransactionType::Deposit,
@@ -507,14 +783,68 @@ mod tests {
     fn statement_eq_true_when_operations_identical_and_meta_ignored() {
         // Checks that Statement equality is based on operations only, meta is ignored.
         let ops1 = vec![
-            op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None),
-            op_new(2, TransactionType::Transfer, 2, 3, 20, 110, Status::Failure, Some("x")),
-            op_new(3, TransactionType::Withdrawal, 3, 0, 30, 120, Status::Pending, Some("y")),
+            op_new(
+                1,
+                TransactionType::Deposit,
+                1,
+                2,
+                10,
+                100,
+                Status::Success,
+                None,
+            ),
+            op_new(
+                2,
+                TransactionType::Transfer,
+                2,
+                3,
+                20,
+                110,
+                Status::Failure,
+                Some("x"),
+            ),
+            op_new(
+                3,
+                TransactionType::Withdrawal,
+                3,
+                0,
+                30,
+                120,
+                Status::Pending,
+                Some("y"),
+            ),
         ];
         let ops2 = vec![
-            op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None),
-            op_new(2, TransactionType::Transfer, 2, 3, 20, 110, Status::Failure, Some("x")),
-            op_new(3, TransactionType::Withdrawal, 3, 0, 30, 120, Status::Pending, Some("y")),
+            op_new(
+                1,
+                TransactionType::Deposit,
+                1,
+                2,
+                10,
+                100,
+                Status::Success,
+                None,
+            ),
+            op_new(
+                2,
+                TransactionType::Transfer,
+                2,
+                3,
+                20,
+                110,
+                Status::Failure,
+                Some("x"),
+            ),
+            op_new(
+                3,
+                TransactionType::Withdrawal,
+                3,
+                0,
+                30,
+                120,
+                Status::Pending,
+                Some("y"),
+            ),
         ];
 
         let a = statement_from_ops(ops1, meta("A", "acc-1", 111));
@@ -596,9 +926,36 @@ mod tests {
     fn write_to_calls_writer_for_each_operation_in_sorted_order() {
         // Checks that write_to calls the writer for each operation and in sorted order.
         let ops = vec![
-            op_new(3, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
-            op_new(1, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
-            op_new(2, TransactionType::Deposit, 1, 1, 10, 100, Status::Success, None),
+            op_new(
+                3,
+                TransactionType::Deposit,
+                1,
+                1,
+                10,
+                100,
+                Status::Success,
+                None,
+            ),
+            op_new(
+                1,
+                TransactionType::Deposit,
+                1,
+                1,
+                10,
+                100,
+                Status::Success,
+                None,
+            ),
+            op_new(
+                2,
+                TransactionType::Deposit,
+                1,
+                1,
+                10,
+                100,
+                Status::Success,
+                None,
+            ),
         ];
         let mut st = statement_from_ops(ops, StatementMeta::default());
 
@@ -654,9 +1011,36 @@ mod tests {
     fn round_trip_using_test_format_read_and_write_strategies() {
         // Checks that the statement can be written and then read back using matching strategies.
         let ops = vec![
-            op_new(2, TransactionType::Transfer, 2, 3, 20, 110, Status::Failure, Some("x")),
-            op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None),
-            op_new(3, TransactionType::Withdrawal, 3, 0, 30, 120, Status::Pending, Some("y")),
+            op_new(
+                2,
+                TransactionType::Transfer,
+                2,
+                3,
+                20,
+                110,
+                Status::Failure,
+                Some("x"),
+            ),
+            op_new(
+                1,
+                TransactionType::Deposit,
+                1,
+                2,
+                10,
+                100,
+                Status::Success,
+                None,
+            ),
+            op_new(
+                3,
+                TransactionType::Withdrawal,
+                3,
+                0,
+                30,
+                120,
+                Status::Pending,
+                Some("y"),
+            ),
         ];
         let mut st = statement_from_ops(ops, StatementMeta::default());
 
@@ -731,7 +1115,7 @@ mod tests {
                         line_no: 0,
                         line: line.to_string(),
                         msg: "Bad tx_type".to_string(),
-                    })
+                    });
                 }
             };
 
@@ -764,7 +1148,7 @@ mod tests {
                         line_no: 0,
                         line: line.to_string(),
                         msg: "Bad status".to_string(),
-                    })
+                    });
                 }
             };
             let desc = if parts[7] == "-" {
@@ -788,9 +1172,36 @@ mod tests {
 
         let expected = statement_from_ops(
             vec![
-                op_new(1, TransactionType::Deposit, 1, 2, 10, 100, Status::Success, None),
-                op_new(2, TransactionType::Transfer, 2, 3, 20, 110, Status::Failure, Some("x")),
-                op_new(3, TransactionType::Withdrawal, 3, 0, 30, 120, Status::Pending, Some("y")),
+                op_new(
+                    1,
+                    TransactionType::Deposit,
+                    1,
+                    2,
+                    10,
+                    100,
+                    Status::Success,
+                    None,
+                ),
+                op_new(
+                    2,
+                    TransactionType::Transfer,
+                    2,
+                    3,
+                    20,
+                    110,
+                    Status::Failure,
+                    Some("x"),
+                ),
+                op_new(
+                    3,
+                    TransactionType::Withdrawal,
+                    3,
+                    0,
+                    30,
+                    120,
+                    Status::Pending,
+                    Some("y"),
+                ),
             ],
             StatementMeta::default(),
         );
